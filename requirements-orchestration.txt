@@ -1,0 +1,5 @@
+# Orchestration / agent frameworks used by apps/
+langgraph>=0.2
+langchain-core>=0.3
+# Already present in this venv for Microsoft Agent Framework:
+# agent-framework, agent-framework-openai, agent-framework-orchestrations
