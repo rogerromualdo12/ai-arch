@@ -135,6 +135,18 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+ai-architect-env/
+
+# Local runtime / generated data
+rag_store/
+data/output_files/*.json
+data/output_folder/*
+!data/output_folder/.gitkeep
+data/input_pdfs/*
+!data/input_pdfs/.gitkeep
+__pycache__/
+**/__pycache__/
+.DS_Store
 
 # Spyder project settings
 .spyderproject

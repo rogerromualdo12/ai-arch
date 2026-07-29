@@ -1,35 +1,38 @@
 # ai-arch
 Mock-up for AI Agents architecture — secure and cost-optimized.
 
-## Stack highlights
+## Layout
 
-| Layer | Tech |
-|---|---|
-| Models | Google Gemini (`google-genai`) |
-| Invoice extraction agent | Gemini tools / AFC |
-| RAG | Chroma + Gemini embeddings over Mansfield LTL JSON |
-| Orchestration | **LangGraph**, **Microsoft Agent Framework** (SequentialBuilder) |
+```
+ai-arch/
+  .env                          # secrets (gitignored)
+  ai-architect-env/             # Python venv only (gitignored)
+  invoice_agent.py              # Gemini PDF → JSON extraction
+  invoice_extraction_agent.py   # tool-calling extraction agent
+  rag/                          # Mansfield invoice RAG
+  apps/                         # LangGraph + Microsoft Agent Framework apps
+  demos/                        # small Gemini / Azure demos
+  data/                         # local PDFs / outputs
+  rag_store/                    # Chroma index (gitignored)
+```
 
 ## Setup
 
 ```bash
-cd ai-architect-env
-source bin/activate
-# GEMINI_API_KEY must be set in .env
+cd ai-arch
+source ai-architect-env/bin/activate
+# Ensure GEMINI_API_KEY is set in .env at repo root
 ```
 
 ## Invoice extraction
 
 ```bash
-# Put PDFs in input_pdfs/
+# Put PDFs in data/input_pdfs/
 python invoice_extraction_agent.py
 python invoice_extraction_agent.py --direct
 ```
 
 ## RAG (Mansfield invoice JSON)
-
-Corpus default: `RAG_DATA_DIR` in `.env`  
-(e.g. Mansfield `Base prompt/output_files`)
 
 ```bash
 python -m rag.ingest
@@ -40,27 +43,26 @@ python -m rag.agent "List Holston invoices and one sample total"
 
 ## Orchestration frameworks
 
-### LangGraph (graph routing)
-Classifies intent → calls the right RAG tool node → synthesizes an answer.
-
+### LangGraph
 ```bash
 python -m apps.langgraph_invoice_app "How many Best Oil invoices are indexed?"
-python -m apps.langgraph_invoice_app "Find diesel deliveries for JP Fuels"
 ```
 
 ### Microsoft Agent Framework (SequentialBuilder)
-RetrieverAgent (tools) → AnalystAgent (final cited answer).  
-Gemini is wired through the **OpenAI Chat Completions** compatible endpoint (`OpenAIChatCompletionClient`) — same multi-agent orchestration style as Semantic Kernel / AutoGen patterns.
-
 ```bash
 python -m apps.maf_sequential_rag "Summarize Best Oil diesel invoices"
 ```
 
-> Free-tier Gemini has low RPM/RPD; if you see `429 RESOURCE_EXHAUSTED`, wait a minute and retry (or enable billing).
+> Free-tier Gemini has low RPM/RPD; if you see `429`, wait and retry (or enable billing).
 
-Also see `workflow.py` for a FastAPI + MAF enterprise chat gateway (Azure OpenAI / CLI credential).
+### Demos
+```bash
+python demos/Hi-AI.py
+python demos/code_execution.py
+python demos/workflow.py   # FastAPI + MAF (Azure)
+```
 
 ## Security notes
 
 - Never commit `.env` or API keys.
-- Prefer env vars / managed identity in production (`workflow.py` pattern).
+- Prefer env vars / managed identity in production (`demos/workflow.py` pattern).

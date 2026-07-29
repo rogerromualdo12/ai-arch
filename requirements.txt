@@ -1,0 +1,13 @@
+google-genai
+python-dotenv
+Pillow
+chromadb
+langgraph>=0.2
+langchain-core>=0.3
+fastapi
+uvicorn
+azure-identity
+openai
+agent-framework
+agent-framework-openai
+agent-framework-orchestrations
