@@ -26,15 +26,58 @@ from google.genai.types import (
     HttpOptions,
 )
 
-from rag.config import CHAT_MODEL, GEMINI_API_KEY, TOP_K
+from rag.config import (
+    CHAT_MODEL,
+    CHAT_PROVIDER,
+    GEMINI_API_KEY,
+    OPENAI_API_KEY,
+    TOP_K,
+)
 from rag.retrieve import get_collection, list_vendor_stats, resolve_vendors, retrieve
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=HttpOptions(api_version="v1beta"),
-)
+_gemini_client = None
+if GEMINI_API_KEY:
+    _gemini_client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=HttpOptions(api_version="v1beta"),
+    )
+# Back-compat for any code still referencing `client`
+client = _gemini_client
+
+
+def _chat_complete(prompt: str, *, system: str | None = None, temperature: float = 0.2) -> str:
+    """Provider-aware chat completion for grounded answers."""
+    if CHAT_PROVIDER == "openai":
+        if not OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY required when RAG_CHAT_PROVIDER=openai")
+        from openai import OpenAI
+
+        oai = OpenAI(api_key=OPENAI_API_KEY)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = oai.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=messages,
+            temperature=temperature,
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    if not _gemini_client:
+        raise RuntimeError("GEMINI_API_KEY required when RAG_CHAT_PROVIDER=gemini")
+    response = _gemini_client.models.generate_content(
+        model=CHAT_MODEL,
+        contents=prompt if not system else f"{system}\n\n{prompt}",
+        config=GenerateContentConfig(
+            temperature=temperature,
+            automatic_function_calling=AutomaticFunctionCallingConfig(disable=True),
+        ),
+    )
+    return (response.text or "").strip()
+
 
 AGENT_SYSTEM = """
 You are the Mansfield LTL Invoice RAG Agent.
@@ -170,17 +213,10 @@ Question: {question}
 Context:
 {context}
 """
-    response = client.models.generate_content(
-        model=CHAT_MODEL,
-        contents=prompt,
-        config=GenerateContentConfig(
-            temperature=0.2,
-            automatic_function_calling=AutomaticFunctionCallingConfig(disable=True),
-        ),
-    )
+    answer = _chat_complete(prompt, temperature=0.2)
     return {
         "ok": True,
-        "answer": (response.text or "").strip(),
+        "answer": answer,
         "sources": sources,
         "vendor_filter": vendor or None,
     }
@@ -190,8 +226,15 @@ TOOLS = [list_vendors, search_invoices, get_invoice, ask_rag]
 
 
 def run_agent(user_goal: str) -> str:
-    logging.info("Starting Mansfield RAG agent (%s)", CHAT_MODEL)
-    response = client.models.generate_content(
+    logging.info("Starting Mansfield RAG agent (%s / %s)", CHAT_PROVIDER, CHAT_MODEL)
+    if CHAT_PROVIDER == "openai":
+        # Full tool-calling loop for OpenAI lives in apps/maf_sequential_rag.py.
+        # Here we ground directly via retrieve + chat.
+        return ask_rag(user_goal).get("answer") or ""
+
+    if not _gemini_client:
+        raise RuntimeError("GEMINI_API_KEY required for Gemini tool-calling agent")
+    response = _gemini_client.models.generate_content(
         model=CHAT_MODEL,
         contents=user_goal,
         config=GenerateContentConfig(

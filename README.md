@@ -35,10 +35,22 @@ python invoice_extraction_agent.py --direct
 ## RAG (Mansfield invoice JSON)
 
 ```bash
+# Default provider is OpenAI embeddings + chat
+# Collections:
+#   mansfield_invoices_openai  (text-embedding-3-small)
+#   mansfield_invoices         (gemini-embedding-001; set RAG_EMBED_PROVIDER=gemini)
+
 python -m rag.ingest
-python -m rag.ask "What is the total on invoice 6893?"
 python -m rag.ask --vendor "best oil" --show-sources "diesel"
-python -m rag.agent "List Holston invoices and one sample total"
+python -m apps.maf_sequential_rag "Summarize Best Oil diesel invoices"
+```
+
+Switch back to Gemini embeddings:
+```bash
+# in .env
+RAG_EMBED_PROVIDER=gemini
+RAG_CHAT_PROVIDER=gemini
+RAG_COLLECTION=mansfield_invoices
 ```
 
 ## Orchestration frameworks
