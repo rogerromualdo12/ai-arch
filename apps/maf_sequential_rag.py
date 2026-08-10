@@ -1,12 +1,11 @@
 """
-Microsoft Agent Framework orchestration — SequentialBuilder.
+Microsoft Agent Framework orchestration — sequential Retriever → Analyst.
 
-Two specialized agents run in sequence over Mansfield invoices:
+Two specialized agents over Mansfield invoices:
   1) RetrieverAgent  — calls RAG search tools
   2) AnalystAgent    — writes the final cited answer
 
-Uses Gemini via the OpenAI-compatible endpoint (same pattern as Semantic Kernel /
-AutoGen-style multi-agent orchestration, on Microsoft Agent Framework).
+Uses Gemini via the OpenAI-compatible Chat Completions endpoint.
 
 Usage:
   python -m apps.maf_sequential_rag "Summarize Best Oil diesel invoices"
@@ -16,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
+import json
 import logging
 import os
 import sys
@@ -24,7 +23,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from agent_framework.openai import OpenAIChatCompletionClient
-from agent_framework.orchestrations import SequentialBuilder
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -33,7 +31,7 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env", override=True)
 os.environ.pop("GOOGLE_API_KEY", None)
 
-from rag.agent import list_vendors, search_invoices, get_invoice  # noqa: E402
+from rag.agent import get_invoice, list_vendors, search_invoices  # noqa: E402
 from rag.config import CHAT_MODEL, GEMINI_API_KEY  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -51,7 +49,41 @@ def build_gemini_client() -> OpenAIChatCompletionClient:
     )
 
 
-def build_workflow():
+def _message_text(message) -> str:
+    text = getattr(message, "text", None)
+    if text and str(text).strip():
+        return str(text).strip()
+    parts = []
+    for content in getattr(message, "contents", None) or []:
+        # Text / FunctionResult shapes from MAF
+        for attr in ("text", "result", "output", "value"):
+            val = getattr(content, attr, None)
+            if val is None:
+                continue
+            if isinstance(val, (dict, list)):
+                parts.append(json.dumps(val, indent=2, default=str)[:4000])
+            else:
+                s = str(val).strip()
+                if s:
+                    parts.append(s)
+    return "\n".join(parts).strip()
+
+
+def _response_text(response) -> str:
+    if response is None:
+        return ""
+    text = getattr(response, "text", None)
+    if text and str(text).strip():
+        return str(text).strip()
+    parts = []
+    for message in getattr(response, "messages", None) or []:
+        t = _message_text(message)
+        if t:
+            parts.append(t)
+    return "\n\n".join(parts).strip()
+
+
+def build_agents():
     chat = build_gemini_client()
 
     retriever = chat.as_agent(
@@ -62,7 +94,8 @@ def build_workflow():
             "Prefer list_vendors for catalog questions, search_invoices for topical "
             "queries (pass vendor aliases jp/awg/best oil/hg when relevant), and "
             "get_invoice for exact invoice numbers. "
-            "Return compact factual findings with invoice numbers, vendors, totals, sources."
+            "After tools return, write a compact factual briefing with invoice numbers, "
+            "vendors, totals, and source paths. Never leave the final message empty."
         ),
         tools=[list_vendors, search_invoices, get_invoice],
     )
@@ -72,59 +105,59 @@ def build_workflow():
         instructions=(
             "You are a senior invoice analyst. Given retriever findings, write a clear "
             "final answer for the user. Cite InvoiceNumber + VendorName. "
-            "If evidence is missing, say so. Do not invent numbers."
+            "If evidence is missing, say so. Do not invent numbers. "
+            "Always produce a non-empty final answer."
         ),
     )
-
-    return SequentialBuilder(participants=[retriever, analyst]).build()
+    return retriever, analyst
 
 
 async def run_query(question: str) -> str:
-    workflow = build_workflow()
-    result = await workflow.run(question)
+    """
+    Explicit sequential orchestration (Retriever → Analyst).
 
-    # WorkflowRunResult helpers (MAF versions differ slightly)
-    for attr in ("get_outputs", "get_messages", "get_final_response"):
-        method = getattr(result, attr, None)
-        if not callable(method):
-            continue
+    Avoids SequentialBuilder's opaque handoff, which with Gemini OpenAI-compat
+    often yields an empty AnalystAgent response.
+    """
+    retriever, analyst = build_agents()
+
+    logging.info("MAF step 1/2: RetrieverAgent")
+    try:
+        retriever_response = await retriever.run(question)
+    except Exception as e:
+        logging.error("RetrieverAgent failed: %s", e)
+        # Deterministic fallback without another LLM hop
+        from rag.agent import ask_rag
+
+        logging.info("Falling back to rag.ask_rag")
+        result = ask_rag(question)
+        return result.get("answer") or str(result)
+
+    findings = _response_text(retriever_response)
+    if not findings:
         try:
-            value = method()
-            if inspect.isawaitable(value):
-                value = await value
-            if value is None:
-                continue
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-            if isinstance(value, list) and value:
-                last = value[-1]
-                text = getattr(last, "text", None) or getattr(last, "content", None) or str(last)
-                if text:
-                    return str(text)
-            text = getattr(value, "text", None)
-            if text:
-                return str(text)
+            findings = json.dumps(retriever_response.to_dict(), indent=2, default=str)[:6000]
         except Exception:
-            continue
+            findings = "(retriever returned no textual findings)"
 
-    texts: list[str] = []
-    for event in getattr(result, "events", []) or []:
-        data = getattr(event, "data", None)
-        if data is None:
-            continue
-        text = getattr(data, "text", None)
-        if text:
-            texts.append(str(text))
-            continue
-        messages = getattr(data, "messages", None)
-        if isinstance(messages, list):
-            for m in messages:
-                t = getattr(m, "text", None) or getattr(m, "content", None)
-                if t:
-                    texts.append(str(t))
-    if texts:
-        return texts[-1]
-    return str(result)
+    logging.info("MAF step 2/2: AnalystAgent")
+    analyst_prompt = (
+        f"User question:\n{question}\n\n"
+        f"Retriever findings (use only this evidence):\n{findings}\n\n"
+        "Write the final user-facing answer now."
+    )
+    try:
+        analyst_response = await analyst.run(analyst_prompt)
+    except Exception as e:
+        logging.warning("AnalystAgent failed (%s); returning retriever findings", e)
+        return findings
+
+    answer = _response_text(analyst_response)
+    if answer:
+        return answer
+
+    logging.warning("AnalystAgent returned empty text; falling back to retriever findings")
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:

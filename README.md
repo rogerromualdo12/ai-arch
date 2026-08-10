@@ -48,12 +48,16 @@ python -m rag.agent "List Holston invoices and one sample total"
 python -m apps.langgraph_invoice_app "How many Best Oil invoices are indexed?"
 ```
 
-### Microsoft Agent Framework (SequentialBuilder)
+### Microsoft Agent Framework (sequential Retriever → Analyst)
+Explicit two-step MAF agents (Gemini via Chat Completions). Avoids SequentialBuilder
+handoff quirks that returned empty Analyst text.
+
 ```bash
 python -m apps.maf_sequential_rag "Summarize Best Oil diesel invoices"
 ```
 
 > Free-tier Gemini has low RPM/RPD; if you see `429`, wait and retry (or enable billing).
+> On retriever failure the app falls back to `rag.ask_rag`.
 
 ### Demos
 ```bash
