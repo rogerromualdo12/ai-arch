@@ -33,8 +33,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 GEMINI_MODEL = os.getenv("GEMINI_INVOICE_MODEL", "gemini-2.5-flash")
 
-INPUT_PDF_DIR = BASE_DIR / "data" / "input_pdfs"
-OUTPUT_JSON_DIR = BASE_DIR / "data" / "output_files"
+INPUT_PDF_DIR = BASE_DIR / data / input_pdfs
+OUTPUT_JSON_DIR = BASE_DIR / data / output_files
 INPUT_PDF_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_JSON_DIR.mkdir(parents=True, exist_ok=True)
 
