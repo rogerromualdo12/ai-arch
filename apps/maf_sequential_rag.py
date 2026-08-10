@@ -5,7 +5,7 @@ Two specialized agents over Mansfield invoices:
   1) RetrieverAgent  — calls RAG search tools
   2) AnalystAgent    — writes the final cited answer
 
-Uses Gemini via the OpenAI-compatible Chat Completions endpoint.
+Uses OpenAI GPT directly (api.openai.com) + OpenAI embeddings collection.
 
 Usage:
   python -m apps.maf_sequential_rag "Summarize Best Oil diesel invoices"
@@ -32,22 +32,16 @@ load_dotenv(ROOT / ".env", override=True)
 os.environ.pop("GOOGLE_API_KEY", None)
 
 from rag.agent import get_invoice, list_vendors, search_invoices  # noqa: E402
-from rag.config import CHAT_MODEL, GEMINI_API_KEY  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-GEMINI_OPENAI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-
-def build_gemini_client() -> OpenAIChatCompletionClient:
-    # Chat Completions API (Gemini OpenAI-compat). OpenAIChatClient uses /responses,
-    # which Gemini does not expose the same way.
+def build_openai_client() -> OpenAIChatCompletionClient:
     return OpenAIChatCompletionClient(
-        model=CHAT_MODEL,
-        api_key=GEMINI_API_KEY,
-        base_url=GEMINI_OPENAI_BASE,
+        model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
+        api_key=os.environ["OPENAI_API_KEY"],
+        # Default base_url → api.openai.com
     )
-
 
 def _message_text(message) -> str:
     text = getattr(message, "text", None)
@@ -84,7 +78,7 @@ def _response_text(response) -> str:
 
 
 def build_agents():
-    chat = build_gemini_client()
+    chat = build_openai_client()
 
     retriever = chat.as_agent(
         name="RetrieverAgent",

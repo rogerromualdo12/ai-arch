@@ -7,52 +7,11 @@ import logging
 import sys
 from pathlib import Path
 
-from google import genai
-from google.genai.types import GenerateContentConfig, HttpOptions
-
-from rag.config import CHAT_MODEL, GEMINI_API_KEY, TOP_K
+from rag.agent import ask_rag
+from rag.config import COLLECTION_NAME, EMBED_PROVIDER, TOP_K
 from rag.retrieve import retrieve
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-
-def answer(question: str, top_k: int = TOP_K, vendor: str | None = None) -> str:
-    hits = retrieve(question, top_k=top_k, vendor=vendor)
-    if not hits:
-        return "No matching invoices found."
-
-    context_blocks = []
-    for i, hit in enumerate(hits, 1):
-        meta = hit["metadata"]
-        context_blocks.append(
-            f"[Source {i}: {meta.get('source', '?')} | vendor={meta.get('vendor')} | "
-            f"invoice={meta.get('invoice_number')} | total={meta.get('total')}]\n"
-            f"{hit['document']}"
-        )
-    context = "\n\n---\n\n".join(context_blocks)
-
-    prompt = f"""You are an invoice analytics assistant for Mansfield LTL fuel invoices.
-
-Answer the question using ONLY the retrieved invoice context below.
-If the answer is not in the context, say you do not have enough information.
-Cite invoice numbers / source files when possible.
-
-Question: {question}
-
-Retrieved context:
-{context}
-"""
-
-    client = genai.Client(
-        api_key=GEMINI_API_KEY,
-        http_options=HttpOptions(api_version="v1beta"),
-    )
-    response = client.models.generate_content(
-        model=CHAT_MODEL,
-        contents=prompt,
-        config=GenerateContentConfig(temperature=0.2),
-    )
-    return (response.text or "").strip()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,10 +37,13 @@ def main(argv: list[str] | None = None) -> int:
         logging.error("No question provided")
         return 1
 
-    vendor = args.vendor or None
+    vendor = args.vendor or ""
     try:
+        logging.info(
+            "RAG ask provider=%s collection=%s", EMBED_PROVIDER, COLLECTION_NAME
+        )
         if args.show_sources:
-            hits = retrieve(question, top_k=args.top_k, vendor=vendor)
+            hits = retrieve(question, top_k=args.top_k, vendor=vendor or None)
             print("=== Retrieved sources ===")
             for i, hit in enumerate(hits, 1):
                 meta = hit["metadata"]
@@ -92,8 +54,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print()
 
-        print(answer(question, top_k=args.top_k, vendor=vendor))
-        return 0
+        result = ask_rag(question, vendor=vendor, top_k=args.top_k)
+        print(result.get("answer") or result)
+        return 0 if result.get("ok") else 1
     except Exception as e:
         logging.error("%s", e)
         return 1

@@ -5,16 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import chromadb
-from google import genai
-from google.genai.types import EmbedContentConfig, HttpOptions
 
-from rag.config import (
-    CHROMA_DIR,
-    COLLECTION_NAME,
-    EMBED_MODEL,
-    GEMINI_API_KEY,
-    TOP_K,
-)
+from rag.config import CHROMA_DIR, COLLECTION_NAME, TOP_K
+from rag.embeddings import embed_query
 
 # Friendly aliases → exact VendorName values stored in metadata
 VENDOR_ALIASES: dict[str, list[str]] = {
@@ -36,7 +29,8 @@ def get_collection():
     collection = chroma.get_or_create_collection(name=COLLECTION_NAME)
     if collection.count() == 0:
         raise RuntimeError(
-            f"Empty collection '{COLLECTION_NAME}'. Run: python -m rag.ingest"
+            f"Empty collection '{COLLECTION_NAME}'. "
+            f"Run: python -m rag.ingest"
         )
     return collection
 
@@ -47,24 +41,10 @@ def resolve_vendors(vendor: str | None) -> list[str] | None:
     key = vendor.strip().lower()
     if key in VENDOR_ALIASES:
         return VENDOR_ALIASES[key]
-    # Exact / case-insensitive match against known vendors in the index
     known = {v.lower(): v for vs in VENDOR_ALIASES.values() for v in vs}
     if key in known:
         return [known[key]]
     return [vendor.strip()]
-
-
-def embed_query(text: str) -> list[float]:
-    client = genai.Client(
-        api_key=GEMINI_API_KEY,
-        http_options=HttpOptions(api_version="v1beta"),
-    )
-    q_emb = client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=text,
-        config=EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
-    )
-    return list(q_emb.embeddings[0].values)
 
 
 def retrieve(
@@ -96,7 +76,6 @@ def retrieve(
     try:
         result = collection.query(**kwargs)
     except Exception:
-        # Fallback if filter matches nothing / chroma where quirks
         if not where:
             raise
         result = collection.query(
@@ -104,7 +83,6 @@ def retrieve(
             n_results=min(n * 5, collection.count()),
             include=["documents", "metadatas", "distances"],
         )
-        # Post-filter
         filtered = []
         docs = (result.get("documents") or [[]])[0]
         metas = (result.get("metadatas") or [[]])[0]
@@ -129,7 +107,6 @@ def retrieve(
 
 def list_vendor_stats() -> dict[str, Any]:
     collection = get_collection()
-    # Pull metadata in pages
     counts: dict[str, int] = {}
     offset = 0
     page = 200
@@ -146,6 +123,7 @@ def list_vendor_stats() -> dict[str, Any]:
         offset += page
     return {
         "total_documents": total,
+        "collection": COLLECTION_NAME,
         "vendors": [
             {"vendor": v, "count": c}
             for v, c in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
