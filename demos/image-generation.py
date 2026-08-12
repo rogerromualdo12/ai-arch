@@ -1,33 +1,37 @@
+import base64
 import os
 from io import BytesIO
 from pathlib import Path
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai.types import GenerateContentConfig, HttpOptions, Modality
+from openai import OpenAI
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env", override=True)
-os.environ.pop("GOOGLE_API_KEY", None)
 
-client = genai.Client(
-    api_key=os.environ["GEMINI_API_KEY"],
-    http_options=HttpOptions(api_version="v1"),
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+# Modelos típicos: "gpt-image-1", "dall-e-3"
+result = client.images.generate(
+    model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1"),
+    prompt="Generate an image of my new apartment, me gusta vista al mar, quiero una sala super amplia estilo americano y que tenga segundo nivel",
+    size="1024x1024",
+    # n=1,
 )
 
-response = client.models.generate_content(
-    model="gemini-3.1-flash-image",
-    contents=("Generate an image of Cuzco with fireworks in the background."),
-    config=GenerateContentConfig(
-        response_modalities=[Modality.TEXT, Modality.IMAGE],
-    ),
-)
-for part in response.candidates[0].content.parts:
-    if part.text:
-        print(part.text)
-    elif part.inline_data:
-        image = Image.open(BytesIO(part.inline_data.data))
-        output_dir = ROOT / "data" / "output_folder"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        image.save(output_dir / "example-image-qosqo.png")
+b64 = result.data[0].b64_json
+if not b64 and getattr(result.data[0], "url", None):
+    # dall-e-3 a veces devuelve URL en vez de b64
+    import urllib.request
+    with urllib.request.urlopen(result.data[0].url) as resp:
+        raw = resp.read()
+else:
+    raw = base64.b64decode(b64)
+
+image = Image.open(BytesIO(raw))
+output_dir = ROOT / "data" / "output_folder"
+output_dir.mkdir(parents=True, exist_ok=True)
+out_path = output_dir / "example-image-qosqo.png"
+image.save(out_path)
+print(f"Saved: {out_path}")
