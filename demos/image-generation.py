@@ -15,7 +15,7 @@ client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 # Modelos típicos: "gpt-image-1", "dall-e-3"
 result = client.images.generate(
     model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1"),
-    prompt="Generate an image of my new apartment, me gusta vista al mar, quiero una sala super amplia estilo americano y que tenga segundo nivel",
+    prompt="Genera una imagen de cuando consiga un contrato como Director de AI",
     size="1024x1024",
     # n=1,
 )
